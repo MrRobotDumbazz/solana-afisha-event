@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::{
     constants::*, error::EventError, logs::EventUpdated, state::Event, state::EventParams,
-    state::EventStatus,
+    state::EventStatus, state::SaleState,
 };
 
 #[derive(Accounts)]
@@ -19,6 +19,9 @@ pub struct UpdateEvent<'info> {
         constraint = event.status == EventStatus::Active @ EventError::EventNotActive,
     )]
     pub event: Account<'info, Event>,
+
+    #[account(seeds = [SALE_SEED, event.key().as_ref()], bump)]
+    pub sale: Option<Account<'info, SaleState>>,
 }
 
 pub fn handle_update_event(
@@ -33,6 +36,16 @@ pub fn handle_update_event(
         params.capacity >= event.tickets_sold,
         EventError::CapacityBelowSold
     );
+
+    if event.hot_sale {
+        ctx.accounts.sale.as_ref().ok_or(EventError::SaleLocked)?;
+        require!(
+            params.ticket_price_lamports == event.ticket_price_lamports
+                && params.hot_sale == event.hot_sale
+                && params.capacity == event.capacity,
+            EventError::SaleLocked
+        );
+    }
 
     event.title = params.title.clone();
     event.description = params.description.clone();

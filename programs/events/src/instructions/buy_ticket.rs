@@ -14,7 +14,8 @@ use anchor_spl::token_2022_extensions::token_metadata::TokenMetadataInitialize;
 
 use crate::{
     constants::*, error::EventError, logs::TicketPurchased, state::truncate_bytes, state::Event,
-    state::EventStatus, state::Ticket, state::TicketStatus,
+    state::EventStatus, state::QueueEntry, state::QueueStatus, state::SaleState, state::Ticket,
+    state::TicketStatus,
 };
 
 pub fn ticket_mint_init_space() -> usize {
@@ -62,6 +63,20 @@ pub struct BuyTicket<'info> {
     )]
     pub ticket: Account<'info, Ticket>,
 
+    #[account(
+        mut,
+        seeds = [SALE_SEED, event.key().as_ref()],
+        bump,
+    )]
+    pub sale: Option<Account<'info, SaleState>>,
+
+    #[account(
+        mut,
+        seeds = [QUEUE_SEED, event.key().as_ref(), buyer.key().as_ref()],
+        bump,
+    )]
+    pub queue_entry: Option<Account<'info, QueueEntry>>,
+
     /// CHECK: buyer's associated token account for the mint, derived address
     /// verified in the handler.
     #[account(mut)]
@@ -77,6 +92,42 @@ pub fn handle_buy_ticket(ctx: Context<BuyTicket>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     require!(now < event.starts_at, EventError::SalesClosed);
     require!(event.tickets_sold < event.capacity, EventError::SoldOut);
+
+    let mut net_price = event.ticket_price_lamports;
+
+    if event.hot_sale {
+        let sale = ctx
+            .accounts
+            .sale
+            .as_ref()
+            .ok_or(EventError::RandomnessNotSettled)?;
+        let entry = ctx
+            .accounts
+            .queue_entry
+            .as_ref()
+            .ok_or(EventError::EntryNotStaked)?;
+
+        require!(entry.event == event.key(), EventError::EntryMismatch);
+        require!(
+            entry.buyer == ctx.accounts.buyer.key(),
+            EventError::EntryMismatch
+        );
+        require!(
+            entry.status == QueueStatus::Staked,
+            EventError::EntryNotStaked
+        );
+        require!(sale.settled, EventError::RandomnessNotSettled);
+        require!(now >= sale.claim_start, EventError::ClaimNotStarted);
+
+        let effective = sale.effective_position(entry);
+        let (round_start, round_end) = sale.round_bounds(sale.round_of(effective));
+        require!(
+            now >= round_start && now < round_end,
+            EventError::WrongClaimRound
+        );
+
+        net_price = net_price.saturating_sub(entry.stake_lamports);
+    }
 
     let buyer_key = ctx.accounts.buyer.key;
     let mint_key = ctx.accounts.mint.key();
@@ -94,7 +145,7 @@ pub fn handle_buy_ticket(ctx: Context<BuyTicket>) -> Result<()> {
     );
 
     let price = event.ticket_price_lamports;
-    if price > 0 {
+    if net_price > 0 {
         anchor_lang::system_program::transfer(
             CpiContext::new(
                 anchor_lang::system_program::ID,
@@ -103,7 +154,7 @@ pub fn handle_buy_ticket(ctx: Context<BuyTicket>) -> Result<()> {
                     to: ctx.accounts.vault.to_account_info(),
                 },
             ),
-            price,
+            net_price,
         )?;
     }
 
@@ -224,6 +275,21 @@ pub fn handle_buy_ticket(ctx: Context<BuyTicket>) -> Result<()> {
     ticket.checked_in_at = 0;
 
     event.tickets_sold = ticket_number;
+
+    if event.hot_sale {
+        let sale = ctx
+            .accounts
+            .sale
+            .as_mut()
+            .ok_or(EventError::RandomnessNotSettled)?;
+        sale.claimed += 1;
+        let entry = ctx
+            .accounts
+            .queue_entry
+            .as_mut()
+            .ok_or(EventError::EntryNotStaked)?;
+        entry.status = QueueStatus::Claimed;
+    }
 
     emit!(TicketPurchased {
         event: event.key(),

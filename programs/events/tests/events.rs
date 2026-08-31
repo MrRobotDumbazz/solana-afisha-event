@@ -106,12 +106,29 @@ fn init_ix(organizer: &Pubkey, slug: &str, params: &EventParams) -> Instruction 
     }
 }
 
+fn sale_pda(event: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"sale", event.as_ref()], &PROGRAM_ID).0
+}
+
+fn queue_pda(event: &Pubkey, buyer: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"queue", event.as_ref(), buyer.as_ref()], &PROGRAM_ID).0
+}
+
+fn update_hot_ix(organizer: &Pubkey, slug: &str, params: &EventParams) -> Instruction {
+    let mut ix = update_ix(organizer, slug, params);
+    let event = event_pda(organizer, slug);
+    ix.accounts[2] = AccountMeta::new_readonly(sale_pda(&event), false);
+    ix
+}
+
 fn update_ix(organizer: &Pubkey, slug: &str, params: &EventParams) -> Instruction {
+    let event = event_pda(organizer, slug);
     Instruction {
         program_id: PROGRAM_ID,
         accounts: vec![
             AccountMeta::new(*organizer, true),
-            AccountMeta::new(event_pda(organizer, slug), false),
+            AccountMeta::new(event, false),
+            AccountMeta::new_readonly(PROGRAM_ID, false),
         ],
         data: ix_data("update_event", &(slug.to_string(), params.clone())),
     }
@@ -128,6 +145,13 @@ fn cancel_ix(organizer: &Pubkey, slug: &str) -> Instruction {
     }
 }
 
+fn withdraw_hot_ix(organizer: &Pubkey, slug: &str, amount: u64) -> Instruction {
+    let mut ix = withdraw_ix(organizer, slug, amount);
+    let event = event_pda(organizer, slug);
+    ix.accounts[2] = AccountMeta::new_readonly(sale_pda(&event), false);
+    ix
+}
+
 fn withdraw_ix(organizer: &Pubkey, slug: &str, amount: u64) -> Instruction {
     let event = event_pda(organizer, slug);
     Instruction {
@@ -135,6 +159,7 @@ fn withdraw_ix(organizer: &Pubkey, slug: &str, amount: u64) -> Instruction {
         accounts: vec![
             AccountMeta::new(*organizer, true),
             AccountMeta::new_readonly(event, false),
+            AccountMeta::new_readonly(PROGRAM_ID, false),
             AccountMeta::new(vault_pda(&event), false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ],
@@ -158,7 +183,7 @@ fn send(env: &mut Env, ix: Instruction, extra_signers: &[&Keypair]) -> Transacti
     signers.extend_from_slice(extra_signers);
     let tx = Transaction::new(
         &signers,
-        Message::new(&[ix], Some(&env.payer.pubkey())),
+        Message::new(&[ix, memo_ix()], Some(&env.payer.pubkey())),
         env.svm.latest_blockhash(),
     );
     env.svm.send_transaction(tx)
@@ -397,6 +422,8 @@ fn buy_ix(
             AccountMeta::new(*vault, false),
             AccountMeta::new(*mint, false),
             AccountMeta::new(*ticket, false),
+            AccountMeta::new_readonly(PROGRAM_ID, false),
+            AccountMeta::new_readonly(PROGRAM_ID, false),
             AccountMeta::new(*ata, false),
             AccountMeta::new_readonly(TOKEN22_PROGRAM_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
@@ -404,6 +431,20 @@ fn buy_ix(
         ],
         data: ix_data("buy_ticket", &()),
     }
+}
+
+fn buy_hot_ix(
+    buyer: &Pubkey,
+    event: &Pubkey,
+    vault: &Pubkey,
+    mint: &Pubkey,
+    ticket: &Pubkey,
+    ata: &Pubkey,
+) -> Instruction {
+    let mut ix = buy_ix(buyer, event, vault, mint, ticket, ata);
+    ix.accounts[5] = AccountMeta::new(sale_pda(event), false);
+    ix.accounts[6] = AccountMeta::new(queue_pda(event, buyer), false);
+    ix
 }
 
 fn check_in_ix(organizer: &Pubkey, event: &Pubkey, ticket: &Pubkey, slug: &str) -> Instruction {
@@ -421,10 +462,21 @@ fn check_in_ix(organizer: &Pubkey, event: &Pubkey, ticket: &Pubkey, slug: &str) 
 fn send_from(env: &mut Env, ix: Instruction, payer: &Keypair) -> TransactionResult {
     let tx = Transaction::new(
         &[payer],
-        Message::new(&[ix], Some(&payer.pubkey())),
+        Message::new(&[ix, memo_ix()], Some(&payer.pubkey())),
         env.svm.latest_blockhash(),
     );
     env.svm.send_transaction(tx)
+}
+
+static TX_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn memo_ix() -> Instruction {
+    let n = TX_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Instruction {
+        program_id: pubkey!("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
+        accounts: vec![],
+        data: format!("tx-{}", n).into_bytes(),
+    }
 }
 
 struct EventFixture {
@@ -671,4 +723,502 @@ fn check_in_rejects_too_early_and_too_late() {
 
     warp(&mut env.svm, fx.params.ends_at + 25 * 3600);
     assert!(send(&mut env, ix, &[]).is_err());
+}
+
+const SLOT_HASHES_SYSVAR: Pubkey = pubkey!("SysvarS1otHashes111111111111111111111111111");
+const STAKE: u64 = 50_000_000;
+
+use events::state::SaleParams;
+
+fn configure_sale_ix(organizer: &Pubkey, slug: &str, params: &SaleParams) -> Instruction {
+    let event = event_pda(organizer, slug);
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(*organizer, true),
+            AccountMeta::new(event, false),
+            AccountMeta::new(sale_pda(&event), false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ],
+        data: ix_data("configure_sale", &(slug.to_string(), params.clone())),
+    }
+}
+
+fn join_queue_ix(buyer: &Pubkey, event: &Pubkey) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(*buyer, true),
+            AccountMeta::new_readonly(*event, false),
+            AccountMeta::new(sale_pda(event), false),
+            AccountMeta::new(queue_pda(event, buyer), false),
+            AccountMeta::new(vault_pda(event), false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ],
+        data: ix_data("join_queue", &()),
+    }
+}
+
+fn settle_randomness_ix(caller: &Pubkey, event: &Pubkey) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new_readonly(*caller, true),
+            AccountMeta::new_readonly(*event, false),
+            AccountMeta::new(sale_pda(event), false),
+            AccountMeta::new_readonly(SLOT_HASHES_SYSVAR, false),
+        ],
+        data: ix_data("settle_randomness", &()),
+    }
+}
+
+fn settle_stake_ix(caller: &Pubkey, event: &Pubkey, entry_buyer: &Pubkey) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new_readonly(*caller, true),
+            AccountMeta::new_readonly(*event, false),
+            AccountMeta::new(sale_pda(event), false),
+            AccountMeta::new(queue_pda(event, entry_buyer), false),
+            AccountMeta::new(*entry_buyer, false),
+            AccountMeta::new(vault_pda(event), false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ],
+        data: ix_data("settle_stake", &()),
+    }
+}
+
+struct HotFixture {
+    event: Pubkey,
+    vault: Pubkey,
+    sale: Pubkey,
+    claim_start: i64,
+    round: i64,
+    starts_at: i64,
+    ends_at: i64,
+}
+
+fn hot_params(now_ts: i64) -> events::state::EventParams {
+    let mut p = params(now_ts);
+    p.hot_sale = true;
+    p.ticket_price_lamports = 150_000_000;
+    p.starts_at = now_ts + 200_000;
+    p.ends_at = now_ts + 206_400;
+    p
+}
+
+fn sale_params(now_ts: i64, window: u32) -> SaleParams {
+    SaleParams {
+        registration_start: now_ts + 60,
+        registration_end: now_ts + 600,
+        reveal_at: now_ts + 700,
+        claim_start: now_ts + 800,
+        round_duration_secs: 300,
+        stake_lamports: STAKE,
+        window_size: window,
+    }
+}
+
+fn create_hot_event(env: &mut Env, slug: &str, capacity: u32, window: u32) -> HotFixture {
+    let t0 = now(&env.svm);
+    let mut p = hot_params(t0);
+    p.capacity = capacity;
+    let organizer = env.payer.pubkey();
+    send(env, init_ix(&organizer, slug, &p), &[]).unwrap();
+
+    let sp = sale_params(t0, window);
+    send(env, configure_sale_ix(&organizer, slug, &sp), &[]).unwrap();
+
+    warp(&mut env.svm, t0 + 100);
+    let event = event_pda(&organizer, slug);
+    HotFixture {
+        vault: vault_pda(&event),
+        sale: sale_pda(&event),
+        event,
+        claim_start: sp.claim_start,
+        round: sp.round_duration_secs,
+        starts_at: p.starts_at,
+        ends_at: p.ends_at,
+    }
+}
+
+fn load_sale(svm: &LiteSVM, pda: &Pubkey) -> events::state::SaleState {
+    let account = svm.get_account(pda).unwrap();
+    events::state::SaleState::deserialize(&mut &account.data[8..]).unwrap()
+}
+
+fn load_entry(svm: &LiteSVM, pda: &Pubkey) -> events::state::QueueEntry {
+    let account = svm.get_account(pda).unwrap();
+    events::state::QueueEntry::deserialize(&mut &account.data[8..]).unwrap()
+}
+
+fn settle_and_warp_to_round(env: &mut Env, fx: &HotFixture, entry_buyer: &Pubkey) {
+    let caller = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 100);
+    send(env, settle_randomness_ix(&caller, &fx.event), &[]).unwrap();
+
+    let sale = load_sale(&env.svm, &fx.sale);
+    let entry = load_entry(&env.svm, &queue_pda(&fx.event, entry_buyer));
+    let eff = ((sale.randomness % sale.total_entries as u64)
+        + (entry.position as u64 % sale.total_entries as u64)) as u32;
+    let round = eff as i64 / sale.window_size as i64;
+    warp(&mut env.svm, fx.claim_start + round * fx.round + 5);
+}
+
+#[test]
+fn configure_sale_creates_state() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "hot-concert", 500, 10);
+
+    let sale = load_sale(&env.svm, &fx.sale);
+    assert_eq!(sale.event, fx.event);
+    assert_eq!(sale.stake_lamports, STAKE);
+    assert_eq!(sale.window_size, 10);
+    assert_eq!(sale.total_entries, 0);
+    assert!(!sale.settled);
+    assert_eq!(sale.pending(), 0);
+}
+
+#[test]
+fn configure_sale_rejects_non_hot_event() {
+    let mut env = setup();
+    let p = params(now(&env.svm));
+    let fx = create_event(&mut env, "cold-event", p);
+    let organizer = env.payer.pubkey();
+    let t0 = now(&env.svm);
+    let ix = configure_sale_ix(&organizer, "cold-event", &sale_params(t0, 10));
+    assert!(send(&mut env, ix, &[]).is_err());
+    assert!(env.svm.get_account(&sale_pda(&fx.event)).is_none());
+}
+
+#[test]
+fn configure_sale_rejects_bad_phases() {
+    let mut env = setup();
+    let organizer = env.payer.pubkey();
+    let t0 = now(&env.svm);
+    send(
+        &mut env,
+        init_ix(&organizer, "bad-phases", &hot_params(t0)),
+        &[],
+    )
+    .unwrap();
+
+    let mut sp = sale_params(t0, 10);
+    sp.claim_start = sp.reveal_at - 100;
+    assert!(send(
+        &mut env,
+        configure_sale_ix(&organizer, "bad-phases", &sp),
+        &[]
+    )
+    .is_err());
+}
+
+#[test]
+fn join_queue_stakes_and_assigns_positions() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "queue-assign", 500, 10);
+    let buyer1 = env.payer.pubkey();
+    let buyer2 = Keypair::new();
+    env.svm.airdrop(&buyer2.pubkey(), 10_000_000_000).unwrap();
+
+    let vault_before = lamports(&env.svm, &fx.vault);
+    send(&mut env, join_queue_ix(&buyer1, &fx.event), &[]).unwrap();
+    send_from(
+        &mut env,
+        join_queue_ix(&buyer2.pubkey(), &fx.event),
+        &buyer2,
+    )
+    .unwrap();
+
+    assert_eq!(lamports(&env.svm, &fx.vault), vault_before + 2 * STAKE);
+    let sale = load_sale(&env.svm, &fx.sale);
+    assert_eq!(sale.total_entries, 2);
+    assert_eq!(sale.pending(), 2);
+
+    let e1 = load_entry(&env.svm, &queue_pda(&fx.event, &buyer1));
+    let e2 = load_entry(&env.svm, &queue_pda(&fx.event, &buyer2.pubkey()));
+    assert_eq!((e1.position, e2.position), (0, 1));
+    assert_eq!(e1.status, events::state::QueueStatus::Staked);
+}
+
+#[test]
+fn join_queue_rejects_outside_window_and_twice() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "queue-window", 500, 10);
+    let buyer = env.payer.pubkey();
+
+    warp(&mut env.svm, fx.claim_start - 5);
+    assert!(send(&mut env, join_queue_ix(&buyer, &fx.event), &[]).is_err());
+
+    warp(&mut env.svm, fx.claim_start - 600);
+    send(&mut env, join_queue_ix(&buyer, &fx.event), &[]).unwrap();
+    let dup = join_queue_ix(&buyer, &fx.event);
+    assert!(send(&mut env, dup, &[]).is_err());
+}
+
+#[test]
+fn settle_randomness_phases() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "reveal-flow", 500, 10);
+    let buyer = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 300);
+    send(&mut env, join_queue_ix(&buyer, &fx.event), &[]).unwrap();
+
+    let caller = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 150);
+    assert!(send(&mut env, settle_randomness_ix(&caller, &fx.event), &[]).is_err());
+
+    warp(&mut env.svm, fx.claim_start - 50);
+    send(&mut env, settle_randomness_ix(&caller, &fx.event), &[]).unwrap();
+    let sale = load_sale(&env.svm, &fx.sale);
+    assert!(sale.settled);
+
+    let dup = settle_randomness_ix(&caller, &fx.event);
+    assert!(send(&mut env, dup, &[]).is_err());
+}
+
+#[test]
+fn queue_buy_flow_mints_ticket_and_claims_stake() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "claim-flow", 500, 10);
+    let buyer = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 300);
+    send(&mut env, join_queue_ix(&buyer, &fx.event), &[]).unwrap();
+
+    settle_and_warp_to_round(&mut env, &fx, &buyer);
+
+    let mint = mint_pda(&fx.event, &buyer);
+    let ticket = ticket_pda(&fx.event, &buyer);
+    let ata = buyer_ata(&buyer, &mint);
+
+    let vault_before = lamports(&env.svm, &fx.vault);
+    send(
+        &mut env,
+        buy_hot_ix(&buyer, &fx.event, &fx.vault, &mint, &ticket, &ata),
+        &[],
+    )
+    .unwrap();
+
+    let full_price = load_event(&env.svm, &fx.event).ticket_price_lamports;
+    assert_eq!(
+        lamports(&env.svm, &fx.vault),
+        vault_before + full_price - STAKE
+    );
+
+    let entry = load_entry(&env.svm, &queue_pda(&fx.event, &buyer));
+    assert_eq!(entry.status, events::state::QueueStatus::Claimed);
+    let sale = load_sale(&env.svm, &fx.sale);
+    assert_eq!(sale.claimed, 1);
+    assert_eq!(sale.pending(), 0);
+    assert_eq!(ata_amount(&env.svm, &ata), 1);
+}
+
+#[test]
+fn queue_buy_rejects_wrong_round_and_early() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "round-gate", 500, 1);
+    let buyer = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 300);
+    send(&mut env, join_queue_ix(&buyer, &fx.event), &[]).unwrap();
+
+    let caller = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 50);
+    send(&mut env, settle_randomness_ix(&caller, &fx.event), &[]).unwrap();
+
+    let mint = mint_pda(&fx.event, &buyer);
+    let ticket = ticket_pda(&fx.event, &buyer);
+    let ata = buyer_ata(&buyer, &mint);
+    let ix = buy_hot_ix(&buyer, &fx.event, &fx.vault, &mint, &ticket, &ata);
+
+    warp(&mut env.svm, fx.claim_start + 999 * fx.round + 5);
+    assert!(send(&mut env, ix.clone(), &[]).is_err());
+
+    let sale = load_sale(&env.svm, &fx.sale);
+    let entry = load_entry(&env.svm, &queue_pda(&fx.event, &buyer));
+    let eff = ((sale.randomness % sale.total_entries as u64)
+        + (entry.position as u64 % sale.total_entries as u64)) as u32;
+    let round = eff as i64 / sale.window_size as i64;
+    warp(&mut env.svm, fx.claim_start + round * fx.round + 5);
+    let fresh = buy_hot_ix(&buyer, &fx.event, &fx.vault, &mint, &ticket, &ata);
+    send(&mut env, fresh, &[]).unwrap();
+}
+
+#[test]
+fn buy_before_settlement_fails() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "no-settle", 500, 10);
+    let buyer = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 300);
+    send(&mut env, join_queue_ix(&buyer, &fx.event), &[]).unwrap();
+
+    warp(&mut env.svm, fx.claim_start + 5);
+    let mint = mint_pda(&fx.event, &buyer);
+    let ticket = ticket_pda(&fx.event, &buyer);
+    let ata = buyer_ata(&buyer, &mint);
+    let ix = buy_hot_ix(&buyer, &fx.event, &fx.vault, &mint, &ticket, &ata);
+    assert!(send(&mut env, ix, &[]).is_err());
+}
+
+#[test]
+fn no_show_forfeits_stake() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "no-show", 500, 1);
+    let buyer = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 300);
+    send(&mut env, join_queue_ix(&buyer, &fx.event), &[]).unwrap();
+
+    let caller = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 50);
+    send(&mut env, settle_randomness_ix(&caller, &fx.event), &[]).unwrap();
+
+    warp(&mut env.svm, fx.starts_at + 10);
+
+    let vault_before = lamports(&env.svm, &fx.vault);
+    let buyer_before = lamports(&env.svm, &buyer);
+    send(&mut env, settle_stake_ix(&caller, &fx.event, &buyer), &[]).unwrap();
+
+    let entry = load_entry(&env.svm, &queue_pda(&fx.event, &buyer));
+    assert_eq!(entry.status, events::state::QueueStatus::Forfeited);
+    assert_eq!(lamports(&env.svm, &fx.vault), vault_before);
+    let fee = 10_000;
+    assert!(lamports(&env.svm, &buyer) < buyer_before + fee);
+
+    warp(&mut env.svm, fx.ends_at + 1);
+    let organizer = env.payer.pubkey();
+    send(&mut env, withdraw_hot_ix(&organizer, "no-show", STAKE), &[]).unwrap();
+}
+
+#[test]
+fn sold_out_losers_get_refund() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "sold-out", 1, 1);
+    let winner_or_loser1 = env.payer.pubkey();
+    let other = Keypair::new();
+    env.svm.airdrop(&other.pubkey(), 10_000_000_000).unwrap();
+
+    warp(&mut env.svm, fx.claim_start - 300);
+    send(&mut env, join_queue_ix(&winner_or_loser1, &fx.event), &[]).unwrap();
+    send_from(&mut env, join_queue_ix(&other.pubkey(), &fx.event), &other).unwrap();
+
+    let caller = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 50);
+    send(&mut env, settle_randomness_ix(&caller, &fx.event), &[]).unwrap();
+
+    let sale = load_sale(&env.svm, &fx.sale);
+    let e1 = load_entry(&env.svm, &queue_pda(&fx.event, &winner_or_loser1));
+    let e2 = load_entry(&env.svm, &queue_pda(&fx.event, &other.pubkey()));
+    let eff = |e: &events::state::QueueEntry| {
+        ((sale.randomness % sale.total_entries as u64)
+            + (e.position as u64 % sale.total_entries as u64)) as u32
+    };
+    let (first, second) = if eff(&e1) < eff(&e2) {
+        (winner_or_loser1, other.pubkey())
+    } else {
+        (other.pubkey(), winner_or_loser1)
+    };
+
+    let round0 = (eff(&if eff(&e1) < eff(&e2) { e1 } else { e2 }) as i64) / 1;
+    warp(&mut env.svm, fx.claim_start + round0 * fx.round + 5);
+
+    let mint = mint_pda(&fx.event, &first);
+    let ticket = ticket_pda(&fx.event, &first);
+    let ata = buyer_ata(&first, &mint);
+    if first == winner_or_loser1 {
+        send(
+            &mut env,
+            buy_hot_ix(&first, &fx.event, &fx.vault, &mint, &ticket, &ata),
+            &[],
+        )
+        .unwrap();
+    } else {
+        send_from(
+            &mut env,
+            buy_hot_ix(&first, &fx.event, &fx.vault, &mint, &ticket, &ata),
+            &other,
+        )
+        .unwrap();
+    }
+
+    assert_eq!(load_event(&env.svm, &fx.event).tickets_sold, 1);
+
+    let vault_before = lamports(&env.svm, &fx.vault);
+    let loser_before = lamports(&env.svm, &second);
+    let settle = settle_stake_ix(&second, &fx.event, &second);
+    if second == winner_or_loser1 {
+        send(&mut env, settle, &[]).unwrap();
+    } else {
+        send_from(&mut env, settle, &other).unwrap();
+    }
+
+    let entry = load_entry(&env.svm, &queue_pda(&fx.event, &second));
+    assert_eq!(entry.status, events::state::QueueStatus::Settled);
+    assert_eq!(lamports(&env.svm, &fx.vault), vault_before - STAKE);
+    let fee = 10_000;
+    assert!(lamports(&env.svm, &second) > loser_before + STAKE - fee);
+}
+
+#[test]
+fn withdraw_blocked_until_stakes_settled() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "pending-guard", 500, 1);
+    let buyer = env.payer.pubkey();
+    warp(&mut env.svm, fx.claim_start - 300);
+    send(&mut env, join_queue_ix(&buyer, &fx.event), &[]).unwrap();
+
+    warp(&mut env.svm, fx.ends_at + 1);
+    let organizer = env.payer.pubkey();
+    assert!(send(
+        &mut env,
+        withdraw_hot_ix(&organizer, "pending-guard", STAKE),
+        &[]
+    )
+    .is_err());
+
+    warp(&mut env.svm, fx.starts_at + 10);
+    send(
+        &mut env,
+        settle_stake_ix(&organizer, &fx.event, &buyer),
+        &[],
+    )
+    .unwrap();
+
+    warp(&mut env.svm, fx.ends_at + 1);
+    send(
+        &mut env,
+        withdraw_hot_ix(&organizer, "pending-guard", STAKE),
+        &[],
+    )
+    .unwrap();
+}
+
+#[test]
+fn update_event_locks_sale_params_for_hot_events() {
+    let mut env = setup();
+    let fx = create_hot_event(&mut env, "locked-params", 500, 10);
+    let organizer = env.payer.pubkey();
+
+    let t0 = now(&env.svm);
+    let mut changed_price = hot_params(t0);
+    changed_price.ticket_price_lamports = 999_000_000;
+    changed_price.capacity = 500;
+    changed_price.starts_at = fx.starts_at;
+    changed_price.ends_at = fx.ends_at;
+    assert!(send(
+        &mut env,
+        update_hot_ix(&organizer, "locked-params", &changed_price),
+        &[]
+    )
+    .is_err());
+
+    let mut renamed = hot_params(t0);
+    renamed.capacity = 500;
+    renamed.starts_at = fx.starts_at;
+    renamed.ends_at = fx.ends_at;
+    renamed.title = "New title".to_string();
+    send(
+        &mut env,
+        update_hot_ix(&organizer, "locked-params", &renamed),
+        &[],
+    )
+    .unwrap();
 }

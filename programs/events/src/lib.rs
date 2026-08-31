@@ -43,4 +43,24 @@ pub mod events {
     pub fn check_in(ctx: Context<CheckIn>, slug: String) -> Result<()> {
         instructions::check_in::handle_check_in(ctx, slug)
     }
+
+    pub fn configure_sale(
+        ctx: Context<ConfigureSale>,
+        slug: String,
+        params: SaleParams,
+    ) -> Result<()> {
+        instructions::configure_sale::handle_configure_sale(ctx, slug, params)
+    }
+
+    pub fn join_queue(ctx: Context<JoinQueue>) -> Result<()> {
+        instructions::join_queue::handle_join_queue(ctx)
+    }
+
+    pub fn settle_randomness(ctx: Context<SettleRandomness>) -> Result<()> {
+        instructions::settle_randomness::handle_settle_randomness(ctx)
+    }
+
+    pub fn settle_stake(ctx: Context<SettleStake>) -> Result<()> {
+        instructions::settle_stake::handle_settle_stake(ctx)
+    }
 }

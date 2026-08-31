@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::{
     constants::*, error::EventError, logs::FundsWithdrawn, state::Event, state::EventStatus,
+    state::SaleState,
 };
 
 #[derive(Accounts)]
@@ -17,6 +18,9 @@ pub struct Withdraw<'info> {
     )]
     pub event: Account<'info, Event>,
 
+    #[account(seeds = [SALE_SEED, event.key().as_ref()], bump)]
+    pub sale: Option<Account<'info, SaleState>>,
+
     #[account(mut, seeds = [VAULT_SEED, event.key().as_ref()], bump)]
     pub vault: SystemAccount<'info>,
 
@@ -30,6 +34,15 @@ pub fn handle_withdraw(ctx: Context<Withdraw>, _slug: String, amount: u64) -> Re
         event.status == EventStatus::Cancelled || now > event.ends_at,
         EventError::EventNotEnded
     );
+
+    if event.hot_sale {
+        let sale = ctx
+            .accounts
+            .sale
+            .as_ref()
+            .ok_or(EventError::StakesPending)?;
+        require!(sale.pending() == 0, EventError::StakesPending);
+    }
 
     let rent_min = Rent::get()?.minimum_balance(0);
     let vault_lamports = ctx.accounts.vault.lamports();

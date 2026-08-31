@@ -53,3 +53,35 @@ pub struct TicketCheckedIn {
     pub buyer: Pubkey,
     pub checked_in_at: i64,
 }
+
+#[event]
+pub struct SaleConfigured {
+    pub event: Pubkey,
+    pub stake_lamports: u64,
+    pub window_size: u32,
+    pub round_duration_secs: i64,
+}
+
+#[event]
+pub struct QueueJoined {
+    pub event: Pubkey,
+    pub buyer: Pubkey,
+    pub entry: Pubkey,
+    pub position: u32,
+    pub total_entries: u32,
+}
+
+#[event]
+pub struct RandomnessSettled {
+    pub event: Pubkey,
+    pub randomness: u64,
+}
+
+#[event]
+pub struct StakeSettled {
+    pub event: Pubkey,
+    pub entry: Pubkey,
+    pub buyer: Pubkey,
+    pub refunded: bool,
+    pub amount: u64,
+}

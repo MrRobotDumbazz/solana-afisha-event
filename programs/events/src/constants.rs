@@ -12,6 +12,12 @@ pub const TICKET_SEED: &[u8] = b"ticket";
 #[constant]
 pub const MINT_SEED: &[u8] = b"mint";
 
+#[constant]
+pub const SALE_SEED: &[u8] = b"sale";
+
+#[constant]
+pub const QUEUE_SEED: &[u8] = b"queue";
+
 pub const SLUG_MAX: usize = 32;
 pub const TITLE_MAX: usize = 64;
 pub const DESCRIPTION_MAX: usize = 512;

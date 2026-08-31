@@ -49,6 +49,113 @@ pub enum TicketStatus {
     Used,
 }
 
+#[account]
+#[derive(InitSpace)]
+pub struct SaleState {
+    pub event: Pubkey,
+    pub registration_start: i64,
+    pub registration_end: i64,
+    pub reveal_at: i64,
+    pub claim_start: i64,
+    pub round_duration_secs: i64,
+    pub stake_lamports: u64,
+    pub window_size: u32,
+    pub total_entries: u32,
+    pub randomness: u64,
+    pub settled: bool,
+    pub claimed: u32,
+    pub settled_count: u32,
+    pub forfeited_count: u32,
+    pub bump: u8,
+}
+
+impl SaleState {
+    pub fn pending(&self) -> u32 {
+        self.total_entries
+            .saturating_sub(self.claimed)
+            .saturating_sub(self.settled_count)
+            .saturating_sub(self.forfeited_count)
+    }
+
+    pub fn effective_position(&self, entry: &QueueEntry) -> u32 {
+        let total = self.total_entries as u64;
+        if total == 0 {
+            return 0;
+        }
+        ((self.randomness % total) + entry.position as u64 % total) as u32
+    }
+
+    pub fn round_of(&self, effective_position: u32) -> u64 {
+        if self.window_size == 0 {
+            return 0;
+        }
+        effective_position as u64 / self.window_size as u64
+    }
+
+    pub fn round_bounds(&self, round: u64) -> (i64, i64) {
+        let start = self
+            .claim_start
+            .saturating_add((round.saturating_mul(self.round_duration_secs as u64)) as i64);
+        (start, start.saturating_add(self.round_duration_secs))
+    }
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct QueueEntry {
+    pub event: Pubkey,
+    pub buyer: Pubkey,
+    pub position: u32,
+    pub stake_lamports: u64,
+    pub status: QueueStatus,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
+pub enum QueueStatus {
+    Staked,
+    Claimed,
+    Settled,
+    Forfeited,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq)]
+pub struct SaleParams {
+    pub registration_start: i64,
+    pub registration_end: i64,
+    pub reveal_at: i64,
+    pub claim_start: i64,
+    pub round_duration_secs: i64,
+    pub stake_lamports: u64,
+    pub window_size: u32,
+}
+
+impl SaleParams {
+    pub fn validate(&self, now: i64) -> Result<()> {
+        require!(
+            self.registration_start >= now,
+            EventError::InvalidSalePhases
+        );
+        require!(
+            self.registration_end > self.registration_start,
+            EventError::InvalidSalePhases
+        );
+        require!(
+            self.reveal_at >= self.registration_end,
+            EventError::InvalidSalePhases
+        );
+        require!(
+            self.claim_start >= self.reveal_at,
+            EventError::InvalidSalePhases
+        );
+        require!(
+            self.round_duration_secs >= 60,
+            EventError::InvalidSalePhases
+        );
+        require!(self.window_size >= 1, EventError::InvalidSalePhases);
+        Ok(())
+    }
+}
+
 pub fn truncate_bytes(s: &str, max: usize) -> &str {
     if s.len() <= max {
         s

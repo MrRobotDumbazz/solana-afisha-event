@@ -27,6 +27,7 @@ required-features = ["test-sbf"]
 [dependencies]
 anchor-lang = "1.1.2"
 anchor-spl = "1.1.2"
+solana-sdk-ids = "3.1"
 
 [dev-dependencies]
 litesvm = "0.10.0"

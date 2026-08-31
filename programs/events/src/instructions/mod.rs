@@ -1,13 +1,21 @@
 pub mod buy_ticket;
 pub mod cancel_event;
 pub mod check_in;
+pub mod configure_sale;
 pub mod init_event;
+pub mod join_queue;
+pub mod settle_randomness;
+pub mod settle_stake;
 pub mod update_event;
 pub mod withdraw;
 
 pub use buy_ticket::*;
 pub use cancel_event::*;
 pub use check_in::*;
+pub use configure_sale::*;
 pub use init_event::*;
+pub use join_queue::*;
+pub use settle_randomness::*;
+pub use settle_stake::*;
 pub use update_event::*;
 pub use withdraw::*;

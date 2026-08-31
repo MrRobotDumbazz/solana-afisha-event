@@ -1244,6 +1244,7 @@ dependencies = [
  "solana-keypair",
  "solana-message",
  "solana-pubkey 3.0.0",
+ "solana-sdk-ids",
  "solana-signer",
  "solana-transaction",
  "spl-token-2022-interface",

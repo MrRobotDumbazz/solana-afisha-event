@@ -44,4 +44,28 @@ pub enum EventError {
     CheckInClosed,
     #[msg("Invalid ticket token account")]
     InvalidTicketAccount,
+    #[msg("Event does not use the fair queue")]
+    NotHotSale,
+    #[msg("Invalid sale phase configuration")]
+    InvalidSalePhases,
+    #[msg("Registration window is not open")]
+    RegistrationClosed,
+    #[msg("Randomness has not been settled yet")]
+    RandomnessNotSettled,
+    #[msg("Randomness has already been settled")]
+    AlreadySettled,
+    #[msg("Claim phase has not started")]
+    ClaimNotStarted,
+    #[msg("Ticket claim window for this queue position is not active")]
+    WrongClaimRound,
+    #[msg("Queue entry is not in staked state")]
+    EntryNotStaked,
+    #[msg("Queue entry belongs to another buyer or event")]
+    EntryMismatch,
+    #[msg("Sale must be over before stakes can be settled")]
+    SettleTooEarly,
+    #[msg("Sale parameters are locked once configured")]
+    SaleLocked,
+    #[msg("Stakes must be settled before withdrawal")]
+    StakesPending,
 }
