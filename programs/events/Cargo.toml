@@ -26,6 +26,7 @@ required-features = ["test-sbf"]
 
 [dependencies]
 anchor-lang = "1.1.2"
+anchor-spl = "1.1.2"
 
 [dev-dependencies]
 litesvm = "0.10.0"
@@ -38,6 +39,8 @@ solana-instruction = "3.0.0"
 solana-clock = "3.0.0"
 borsh = "1.8.1"
 sha2 = "0.10"
+spl-token-2022-interface = "2.1.0"
+spl-token-metadata-interface = "0.8.0"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

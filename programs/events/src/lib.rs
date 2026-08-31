@@ -35,4 +35,12 @@ pub mod events {
     pub fn withdraw(ctx: Context<Withdraw>, slug: String, amount: u64) -> Result<()> {
         instructions::withdraw::handle_withdraw(ctx, slug, amount)
     }
+
+    pub fn buy_ticket(ctx: Context<BuyTicket>) -> Result<()> {
+        instructions::buy_ticket::handle_buy_ticket(ctx)
+    }
+
+    pub fn check_in(ctx: Context<CheckIn>, slug: String) -> Result<()> {
+        instructions::check_in::handle_check_in(ctx, slug)
+    }
 }

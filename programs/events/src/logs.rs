@@ -35,3 +35,21 @@ pub struct FundsWithdrawn {
     pub organizer: Pubkey,
     pub amount: u64,
 }
+
+#[event]
+pub struct TicketPurchased {
+    pub event: Pubkey,
+    pub buyer: Pubkey,
+    pub ticket: Pubkey,
+    pub mint: Pubkey,
+    pub ticket_number: u32,
+    pub price_lamports: u64,
+}
+
+#[event]
+pub struct TicketCheckedIn {
+    pub event: Pubkey,
+    pub ticket: Pubkey,
+    pub buyer: Pubkey,
+    pub checked_in_at: i64,
+}

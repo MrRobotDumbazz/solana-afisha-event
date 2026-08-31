@@ -17,6 +17,7 @@ use solana_transaction::Transaction;
 use events::state::Event;
 use events::state::EventParams;
 use events::state::EventStatus;
+use events::state::TicketStatus;
 
 const PROGRAM_ID: Pubkey = pubkey!("7J6VC2HsTxBCBMc94FbcfT2NcN2bmSK5nhjejeuL4g8Y");
 const SYSTEM_PROGRAM_ID: Pubkey = pubkey!("11111111111111111111111111111111");
@@ -359,4 +360,315 @@ fn withdraw_rejects_draining_rent_and_zero() {
     let full = lamports(&env.svm, &vault);
     assert!(send(&mut env, withdraw_ix(&organizer, SLUG, full), &[]).is_err());
     assert!(send(&mut env, withdraw_ix(&organizer, SLUG, 0), &[]).is_err());
+}
+
+const TOKEN22_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+const ATA_PROGRAM_ID: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+fn mint_pda(event: &Pubkey, buyer: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"mint", event.as_ref(), buyer.as_ref()], &PROGRAM_ID).0
+}
+
+fn ticket_pda(event: &Pubkey, buyer: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"ticket", event.as_ref(), buyer.as_ref()], &PROGRAM_ID).0
+}
+
+fn buyer_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[owner.as_ref(), TOKEN22_PROGRAM_ID.as_ref(), mint.as_ref()],
+        &ATA_PROGRAM_ID,
+    )
+    .0
+}
+
+fn buy_ix(
+    buyer: &Pubkey,
+    event: &Pubkey,
+    vault: &Pubkey,
+    mint: &Pubkey,
+    ticket: &Pubkey,
+    ata: &Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(*buyer, true),
+            AccountMeta::new(*event, false),
+            AccountMeta::new(*vault, false),
+            AccountMeta::new(*mint, false),
+            AccountMeta::new(*ticket, false),
+            AccountMeta::new(*ata, false),
+            AccountMeta::new_readonly(TOKEN22_PROGRAM_ID, false),
+            AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ],
+        data: ix_data("buy_ticket", &()),
+    }
+}
+
+fn check_in_ix(organizer: &Pubkey, event: &Pubkey, ticket: &Pubkey, slug: &str) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(*organizer, true),
+            AccountMeta::new(*event, false),
+            AccountMeta::new(*ticket, false),
+        ],
+        data: ix_data("check_in", &(slug.to_string(),)),
+    }
+}
+
+fn send_from(env: &mut Env, ix: Instruction, payer: &Keypair) -> TransactionResult {
+    let tx = Transaction::new(
+        &[payer],
+        Message::new(&[ix], Some(&payer.pubkey())),
+        env.svm.latest_blockhash(),
+    );
+    env.svm.send_transaction(tx)
+}
+
+struct EventFixture {
+    event: Pubkey,
+    vault: Pubkey,
+    params: EventParams,
+}
+
+fn create_event(env: &mut Env, slug: &str, mut params: EventParams) -> EventFixture {
+    params.starts_at = now(&env.svm) + 3600;
+    params.ends_at = params.starts_at + 3600;
+    let organizer = env.payer.pubkey();
+    send(env, init_ix(&organizer, slug, &params), &[]).unwrap();
+    let event = event_pda(&organizer, slug);
+    EventFixture {
+        vault: vault_pda(&event),
+        event,
+        params,
+    }
+}
+
+fn ata_amount(svm: &LiteSVM, ata: &Pubkey) -> u64 {
+    let account = svm.get_account(ata).unwrap();
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(&account.data[64..72]);
+    u64::from_le_bytes(buf)
+}
+
+#[test]
+fn buy_ticket_mints_nft_and_pays_vault() {
+    let mut env = setup();
+    let p = params(now(&env.svm));
+    let fx = create_event(&mut env, "nft-show", p);
+    let buyer = env.payer.pubkey();
+    let mint = mint_pda(&fx.event, &buyer);
+    let ticket = ticket_pda(&fx.event, &buyer);
+    let ata = buyer_ata(&buyer, &mint);
+
+    let vault_before = lamports(&env.svm, &fx.vault);
+    send(
+        &mut env,
+        buy_ix(&buyer, &fx.event, &fx.vault, &mint, &ticket, &ata),
+        &[],
+    )
+    .unwrap();
+
+    let t = load_event(&env.svm, &fx.event);
+    assert_eq!(t.tickets_sold, 1);
+    assert_eq!(
+        lamports(&env.svm, &fx.vault),
+        vault_before + fx.params.ticket_price_lamports
+    );
+    assert_eq!(ata_amount(&env.svm, &ata), 1);
+
+    let ticket_acc = env.svm.get_account(&ticket).unwrap();
+    let ticket_data = events::state::Ticket::deserialize(&mut &ticket_acc.data[8..]).unwrap();
+    assert_eq!(ticket_data.status, TicketStatus::Valid);
+    assert_eq!(ticket_data.mint, mint);
+    assert_eq!(ticket_data.buyer.as_ref(), buyer.as_ref());
+
+    use spl_token_2022_interface::extension::BaseStateWithExtensions;
+    use spl_token_2022_interface::extension::StateWithExtensions;
+    use spl_token_2022_interface::state::Mint as SplMint;
+    use spl_token_metadata_interface::state::TokenMetadata;
+
+    let mint_acc = env.svm.get_account(&mint).unwrap();
+    let mint_state = StateWithExtensions::<SplMint>::unpack(&mint_acc.data).unwrap();
+    let metadata = mint_state
+        .get_variable_len_extension::<TokenMetadata>()
+        .unwrap();
+    assert_eq!(metadata.name, "Solana Break 2026 #1");
+    assert_eq!(metadata.symbol, "AFISHA");
+    assert_eq!(metadata.uri, "https://example.com/img.png");
+    assert_eq!(mint_state.base.supply, 1);
+}
+
+#[test]
+fn buy_ticket_rejects_second_for_same_wallet() {
+    let mut env = setup();
+    let p = params(now(&env.svm));
+    let fx = create_event(&mut env, "one-per-wallet", p);
+    let buyer = env.payer.pubkey();
+    let mint = mint_pda(&fx.event, &buyer);
+    let ticket = ticket_pda(&fx.event, &buyer);
+    let ata = buyer_ata(&buyer, &mint);
+
+    let ix = buy_ix(&buyer, &fx.event, &fx.vault, &mint, &ticket, &ata);
+    send(&mut env, ix.clone(), &[]).unwrap();
+    assert!(send(&mut env, ix, &[]).is_err());
+}
+
+#[test]
+fn buy_ticket_rejects_sold_out() {
+    let mut env = setup();
+    let mut p = params(now(&env.svm));
+    p.capacity = 1;
+    let fx = create_event(&mut env, "tiny-venue", p.clone());
+    let organizer = env.payer.pubkey();
+    let buyer2 = Keypair::new();
+    env.svm.airdrop(&buyer2.pubkey(), 10_000_000_000).unwrap();
+
+    let mint1 = mint_pda(&fx.event, &organizer);
+    let ata1 = buyer_ata(&organizer, &mint1);
+    send(
+        &mut env,
+        buy_ix(
+            &organizer,
+            &fx.event,
+            &fx.vault,
+            &mint1,
+            &ticket_pda(&fx.event, &organizer),
+            &ata1,
+        ),
+        &[],
+    )
+    .unwrap();
+
+    let mint2 = mint_pda(&fx.event, &buyer2.pubkey());
+    let ata2 = buyer_ata(&buyer2.pubkey(), &mint2);
+    let ix = buy_ix(
+        &buyer2.pubkey(),
+        &fx.event,
+        &fx.vault,
+        &mint2,
+        &ticket_pda(&fx.event, &buyer2.pubkey()),
+        &ata2,
+    );
+    assert!(send_from(&mut env, ix, &buyer2).is_err());
+}
+
+#[test]
+fn buy_ticket_rejects_after_start_and_cancelled() {
+    let mut env = setup();
+    let p = params(now(&env.svm));
+    let fx = create_event(&mut env, "late-show", p);
+    let buyer = env.payer.pubkey();
+    let mint = mint_pda(&fx.event, &buyer);
+    let ticket = ticket_pda(&fx.event, &buyer);
+    let ata = buyer_ata(&buyer, &mint);
+    let ix = buy_ix(&buyer, &fx.event, &fx.vault, &mint, &ticket, &ata);
+
+    warp(&mut env.svm, fx.params.starts_at + 1);
+    assert!(send(&mut env, ix.clone(), &[]).is_err());
+    warp(&mut env.svm, fx.params.starts_at - 100);
+
+    send(&mut env, cancel_ix(&buyer, "late-show"), &[]).unwrap();
+    assert!(send(&mut env, ix, &[]).is_err());
+}
+
+#[test]
+fn buy_ticket_free_event_works() {
+    let mut env = setup();
+    let mut p = params(now(&env.svm));
+    p.ticket_price_lamports = 0;
+    let fx = create_event(&mut env, "free-entry", p);
+    let buyer = env.payer.pubkey();
+    let mint = mint_pda(&fx.event, &buyer);
+    let ticket = ticket_pda(&fx.event, &buyer);
+    let ata = buyer_ata(&buyer, &mint);
+
+    let vault_before = lamports(&env.svm, &fx.vault);
+    send(
+        &mut env,
+        buy_ix(&buyer, &fx.event, &fx.vault, &mint, &ticket, &ata),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(lamports(&env.svm, &fx.vault), vault_before);
+    assert_eq!(ata_amount(&env.svm, &ata), 1);
+}
+
+#[test]
+fn check_in_marks_used_and_rejects_twice() {
+    let mut env = setup();
+    let p = params(now(&env.svm));
+    let fx = create_event(&mut env, "door-scan", p);
+    let organizer = env.payer.pubkey();
+    let mint = mint_pda(&fx.event, &organizer);
+    let ticket = ticket_pda(&fx.event, &organizer);
+    let ata = buyer_ata(&organizer, &mint);
+
+    send(
+        &mut env,
+        buy_ix(&organizer, &fx.event, &fx.vault, &mint, &ticket, &ata),
+        &[],
+    )
+    .unwrap();
+
+    warp(&mut env.svm, fx.params.starts_at);
+
+    let ix = check_in_ix(&organizer, &fx.event, &ticket, "door-scan");
+    send(&mut env, ix.clone(), &[]).unwrap();
+    assert!(send(&mut env, ix, &[]).is_err());
+
+    let ticket_acc = env.svm.get_account(&ticket).unwrap();
+    let ticket_data = events::state::Ticket::deserialize(&mut &ticket_acc.data[8..]).unwrap();
+    assert_eq!(ticket_data.status, TicketStatus::Used);
+    assert!(ticket_data.checked_in_at > 0);
+}
+
+#[test]
+fn check_in_rejects_foreign_organizer() {
+    let mut env = setup();
+    let p = params(now(&env.svm));
+    let fx = create_event(&mut env, "strict-door", p);
+    let organizer = env.payer.pubkey();
+    let mint = mint_pda(&fx.event, &organizer);
+    let ticket = ticket_pda(&fx.event, &organizer);
+    let ata = buyer_ata(&organizer, &mint);
+
+    send(
+        &mut env,
+        buy_ix(&organizer, &fx.event, &fx.vault, &mint, &ticket, &ata),
+        &[],
+    )
+    .unwrap();
+    warp(&mut env.svm, fx.params.starts_at);
+
+    let stranger = Keypair::new();
+    let ix = check_in_ix(&stranger.pubkey(), &fx.event, &ticket, "strict-door");
+    assert!(send_from(&mut env, ix, &stranger).is_err());
+}
+
+#[test]
+fn check_in_rejects_too_early_and_too_late() {
+    let mut env = setup();
+    let p = params(now(&env.svm));
+    let fx = create_event(&mut env, "time-window", p);
+    let organizer = env.payer.pubkey();
+    let mint = mint_pda(&fx.event, &organizer);
+    let ticket = ticket_pda(&fx.event, &organizer);
+    let ata = buyer_ata(&organizer, &mint);
+
+    send(
+        &mut env,
+        buy_ix(&organizer, &fx.event, &fx.vault, &mint, &ticket, &ata),
+        &[],
+    )
+    .unwrap();
+
+    warp(&mut env.svm, fx.params.starts_at - 4000);
+    let ix = check_in_ix(&organizer, &fx.event, &ticket, "time-window");
+    assert!(send(&mut env, ix.clone(), &[]).is_err());
+
+    warp(&mut env.svm, fx.params.ends_at + 25 * 3600);
+    assert!(send(&mut env, ix, &[]).is_err());
 }

@@ -33,6 +33,34 @@ pub enum EventStatus {
     Cancelled,
 }
 
+#[account]
+#[derive(InitSpace)]
+pub struct Ticket {
+    pub event: Pubkey,
+    pub buyer: Pubkey,
+    pub mint: Pubkey,
+    pub status: TicketStatus,
+    pub checked_in_at: i64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
+pub enum TicketStatus {
+    Valid,
+    Used,
+}
+
+pub fn truncate_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        s
+    } else {
+        let mut end = max;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        &s[..end]
+    }
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq)]
 pub struct EventParams {
     pub title: String,

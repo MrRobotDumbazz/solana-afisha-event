@@ -30,4 +30,18 @@ pub enum EventError {
     EventNotEnded,
     #[msg("Invalid withdrawal amount")]
     InvalidAmount,
+    #[msg("Event has already started, tickets cannot be purchased")]
+    SalesClosed,
+    #[msg("Event is sold out")]
+    SoldOut,
+    #[msg("Ticket belongs to a different event")]
+    TicketEventMismatch,
+    #[msg("Ticket has already been used")]
+    TicketAlreadyUsed,
+    #[msg("Check-in is not open yet")]
+    CheckInNotOpen,
+    #[msg("Check-in window has closed")]
+    CheckInClosed,
+    #[msg("Invalid ticket token account")]
+    InvalidTicketAccount,
 }
