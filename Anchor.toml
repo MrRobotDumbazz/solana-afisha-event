@@ -1,0 +1,21 @@
+[toolchain]
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+events = "7J6VC2HsTxBCBMc94FbcfT2NcN2bmSK5nhjejeuL4g8Y"
+
+[programs.devnet]
+events = "7J6VC2HsTxBCBMc94FbcfT2NcN2bmSK5nhjejeuL4g8Y"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "npm run test"
