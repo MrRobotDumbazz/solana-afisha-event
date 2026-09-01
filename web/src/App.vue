@@ -1,24 +1,53 @@
 <script setup>
 import { useWallet } from '@solana/wallet-adapter-vue'
+import { RouterLink } from 'vue-router'
 import ConnectWallet from './components/ConnectWallet.vue'
-import EventList from './components/EventList.vue'
 
 const { publicKey } = useWallet()
 
-function shortAddress(address) {
+function short(address) {
   return `${address.slice(0, 4)}…${address.slice(-4)}`
 }
 </script>
 
 <template>
   <header class="header">
-    <h1>Afisha<span class="accent">.sol</span></h1>
-    <div>
-      <span v-if="publicKey" class="muted">{{ shortAddress(publicKey.toBase58()) }}</span>
+    <nav class="nav">
+      <RouterLink to="/" class="brand">Afisha<span class="accent">.sol</span></RouterLink>
+      <RouterLink to="/tickets" class="nav-link">Мои билеты</RouterLink>
+    </nav>
+    <div class="wallet-box">
+      <span v-if="publicKey" class="muted">{{ short(publicKey.toBase58()) }}</span>
       <ConnectWallet />
     </div>
   </header>
   <main>
-    <EventList />
+    <RouterView />
   </main>
 </template>
+
+<style scoped>
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.brand {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+}
+.nav-link {
+  color: var(--muted);
+  text-decoration: none;
+}
+.nav-link:hover {
+  color: var(--accent);
+}
+.wallet-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+</style>
