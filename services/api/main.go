@@ -2,26 +2,47 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
+
+	"afisha/api/internal/api"
+	"afisha/api/internal/indexer"
+	"afisha/api/internal/store"
 )
 
 type config struct {
-	Port   string
-	RPCURL string
+	Port         string
+	DatabaseURL  string
+	RPCURL       string
+	WSURL        string
+	ProgramID    string
+	ResyncPeriod time.Duration
 }
 
 func loadConfig() config {
 	return config{
-		Port:   envOr("PORT", "8080"),
-		RPCURL: envOr("RPC_URL", "http://127.0.0.1:8899"),
+		Port:         envOr("PORT", "8080"),
+		DatabaseURL:  envOr("DATABASE_URL", "postgres://postgres:postgres@127.0.0.1:5432/afisha?sslmode=disable"),
+		RPCURL:       envOr("RPC_URL", "https://api.devnet.solana.com"),
+		WSURL:        envOr("WS_URL", defaultWS(os.Getenv("RPC_URL"))),
+		ProgramID:    envOr("PROGRAM_ID", "7J6VC2HsTxBCBMc94FbcfT2NcN2bmSK5nhjejeuL4g8Y"),
+		ResyncPeriod: 10 * time.Minute,
 	}
+}
+
+func defaultWS(rpcURL string) string {
+	if rpcURL == "" {
+		return "wss://api.devnet.solana.com"
+	}
+	ws := strings.Replace(rpcURL, "https://", "wss://", 1)
+	ws = strings.Replace(ws, "http://", "ws://", 1)
+	return ws
 }
 
 func envOr(key, fallback string) string {
@@ -31,63 +52,65 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-type server struct {
-	logger *slog.Logger
-	cfg    config
-}
-
-func newServer(cfg config) *server {
-	return &server{
-		logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-		cfg:    cfg,
-	}
-}
-
-func (s *server) routes() *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", s.handleHealth)
-	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
-	return mux
-}
-
-func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"events": []any{}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := loadConfig()
-	srv := newServer(cfg)
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	st, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("store open failed", "err", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+	logger.Info("postgres ready", "url", redact(cfg.DatabaseURL))
+
+	runIndexer := os.Getenv("DISABLE_INDEXER") == ""
+	if runIndexer {
+		ix, err := indexer.New(cfg.RPCURL, cfg.WSURL, cfg.ProgramID, st, logger)
+		if err != nil {
+			logger.Error("indexer init failed", "err", err)
+			os.Exit(1)
+		}
+		go func() {
+			if err := ix.Run(ctx, cfg.ResyncPeriod); err != nil && ctx.Err() == nil {
+				logger.Error("indexer stopped", "err", err)
+			}
+		}()
+		logger.Info("indexer started", "rpc", cfg.RPCURL, "ws", cfg.WSURL, "program", cfg.ProgramID)
+	} else {
+		logger.Info("indexer disabled")
+	}
+
+	srv := api.New(st, logger)
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           srv.routes(),
+		Handler:           srv.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	go func() {
-		srv.logger.Info("api listening", "port", cfg.Port, "rpc", cfg.RPCURL)
+		logger.Info("api listening", "port", cfg.Port)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			srv.logger.Error("listen failed", "err", err)
+			logger.Error("listen failed", "err", err)
 			os.Exit(1)
 		}
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = httpSrv.Shutdown(ctx)
-	srv.logger.Info("api stopped")
+	_ = httpSrv.Shutdown(shutdownCtx)
+	logger.Info("api stopped")
+}
+
+func redact(databaseURL string) string {
+	if at := strings.Index(databaseURL, "@"); at > 0 {
+		if slash := strings.Index(databaseURL, "//"); slash >= 0 && slash+2 < at {
+			return databaseURL[:slash+2] + "***" + databaseURL[at:]
+		}
+	}
+	return databaseURL
 }
