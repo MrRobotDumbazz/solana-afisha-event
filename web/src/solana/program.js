@@ -98,6 +98,45 @@ export function ixJoinQueue(buyer, event) {
   })
 }
 
+export function ixConfigureSale(organizer, event, slug, params) {
+  const w = new BorshWriter()
+  w.str(slug)
+  w.i64(params.registration_start)
+    .i64(params.registration_end)
+    .i64(params.reveal_at)
+    .i64(params.claim_start)
+    .i64(params.round_duration_secs)
+    .u64(params.stake_lamports)
+    .u32(params.window_size)
+  return new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [
+      { pubkey: organizer, isSigner: true, isWritable: true },
+      { pubkey: event, isSigner: false, isWritable: false },
+      { pubkey: pdaSale(event), isSigner: false, isWritable: true },
+      { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.concat([Buffer.from(disc('configure_sale')), w.toBuffer()]),
+  })
+}
+
+export const SLOT_HASHES_SYSVAR = new PublicKey(
+  'SysvarS1otHashes111111111111111111111111111',
+)
+
+export function ixSettleRandomness(caller, event) {
+  return new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [
+      { pubkey: caller, isSigner: true, isWritable: false },
+      { pubkey: event, isSigner: false, isWritable: false },
+      { pubkey: pdaSale(event), isSigner: false, isWritable: true },
+      { pubkey: SLOT_HASHES_SYSVAR, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.from(disc('settle_randomness')),
+  })
+}
+
 export function ixBuyTicket(buyer, event, { hot = false } = {}) {
   const mint = pdaMint(event, buyer)
   return new TransactionInstruction({

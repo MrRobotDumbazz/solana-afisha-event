@@ -133,7 +133,6 @@ func (ix *Indexer) SyncAll(ctx context.Context) error {
 			ix.logger.Warn("bad sale data", "pubkey", data.pubkey, "err", err)
 			continue
 		}
-		sa.EventPubkey = data.pubkey
 		if err := ix.store.UpsertSale(ctx, sa); err != nil {
 			ix.logger.Warn("sale upsert skipped", "pubkey", data.pubkey, "err", err)
 		}
@@ -290,7 +289,6 @@ func (ix *Indexer) refreshAccounts(ctx context.Context, keys []solana.PublicKey)
 			case decode.KindSaleState:
 				sa, err := decode.SaleState(data)
 				if err == nil {
-					sa.EventPubkey = pub
 					if err := ix.store.UpsertSale(ctx, sa); err != nil {
 						ix.logger.Warn("sale upsert failed", "pubkey", pub, "err", err)
 					}

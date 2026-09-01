@@ -15,6 +15,8 @@ function short(address) {
     <nav class="nav">
       <RouterLink to="/" class="brand">Afisha<span class="accent">.sol</span></RouterLink>
       <RouterLink to="/tickets" class="nav-link">Мои билеты</RouterLink>
+      <RouterLink to="/organizer" class="nav-link">Организатор</RouterLink>
+      <RouterLink to="/scan" class="nav-link">Сканер</RouterLink>
     </nav>
     <div class="wallet-box">
       <span v-if="publicKey" class="muted">{{ short(publicKey.toBase58()) }}</span>

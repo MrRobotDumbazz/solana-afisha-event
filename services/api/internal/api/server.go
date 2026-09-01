@@ -42,12 +42,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
 	events, total, err := s.store.ListEvents(r.Context(), store.EventFilter{
-		City:     q.Get("city"),
-		Query:    q.Get("q"),
-		Status:   q.Get("status"),
-		Upcoming: q.Get("upcoming") == "true",
-		Limit:    limit,
-		Offset:   offset,
+		City:      q.Get("city"),
+		Query:     q.Get("q"),
+		Status:    q.Get("status"),
+		Organizer: q.Get("organizer"),
+		Upcoming:  q.Get("upcoming") == "true",
+		Limit:     limit,
+		Offset:    offset,
 	})
 	if err != nil {
 		s.logger.Error("list events", "err", err)

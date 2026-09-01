@@ -35,7 +35,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS events_organizer_slug ON events (organizer, sl
 
 CREATE TABLE IF NOT EXISTS tickets (
   pubkey TEXT PRIMARY KEY,
-  event_pubkey TEXT NOT NULL REFERENCES events (pubkey) ON DELETE CASCADE,
+  event_pubkey TEXT NOT NULL,
   buyer TEXT NOT NULL,
   mint TEXT NOT NULL UNIQUE,
   status SMALLINT NOT NULL,
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS sales (
 
 CREATE TABLE IF NOT EXISTS queue_entries (
   pubkey TEXT PRIMARY KEY,
-  event_pubkey TEXT NOT NULL REFERENCES events (pubkey) ON DELETE CASCADE,
+  event_pubkey TEXT NOT NULL,
   buyer TEXT NOT NULL,
   position INT NOT NULL,
   stake_lamports BIGINT NOT NULL,
@@ -178,12 +178,13 @@ func (s *Store) DeleteAccount(ctx context.Context, pubkey string) error {
 }
 
 type EventFilter struct {
-	City     string
-	Query    string
-	Status   string
-	Upcoming bool
-	Limit    int
-	Offset   int
+	City      string
+	Query     string
+	Status    string
+	Organizer string
+	Upcoming  bool
+	Limit     int
+	Offset    int
 }
 
 func (s *Store) ListEvents(ctx context.Context, f EventFilter) ([]model.Event, int, error) {
@@ -198,6 +199,11 @@ func (s *Store) ListEvents(ctx context.Context, f EventFilter) ([]model.Event, i
 	if f.Query != "" {
 		where += fmt.Sprintf(" AND (title ILIKE '%%' || $%d || '%%' OR description ILIKE '%%' || $%d || '%%' OR venue ILIKE '%%' || $%d || '%%')", n, n, n)
 		args = append(args, f.Query)
+		n++
+	}
+	if f.Organizer != "" {
+		where += fmt.Sprintf(" AND organizer = $%d", n)
+		args = append(args, f.Organizer)
 		n++
 	}
 	if f.Status != "" {
@@ -223,7 +229,10 @@ func (s *Store) ListEvents(ctx context.Context, f EventFilter) ([]model.Event, i
 	if offset < 0 {
 		offset = 0
 	}
-	q := fmt.Sprintf("SELECT pubkey, organizer, slug, title, description, venue, city, image_uri, starts_at, ends_at, ticket_price_lamports, capacity, tickets_sold, hot_sale, status FROM events %s ORDER BY starts_at ASC LIMIT %d OFFSET %d",
+	q := fmt.Sprintf(`SELECT pubkey, organizer, slug, title, description, venue, city, image_uri,
+			starts_at, ends_at, ticket_price_lamports, capacity, tickets_sold, hot_sale, status,
+			EXISTS(SELECT 1 FROM sales WHERE sales.event_pubkey = events.pubkey)
+		FROM events %s ORDER BY starts_at ASC LIMIT %d OFFSET %d`,
 		where, limit, offset)
 
 	rows, err := s.pool.Query(ctx, q, args...)
@@ -232,15 +241,22 @@ func (s *Store) ListEvents(ctx context.Context, f EventFilter) ([]model.Event, i
 	}
 	defer rows.Close()
 
+	type row struct {
+		model.Event
+		SaleConfigured bool
+	}
 	var out []model.Event
 	for rows.Next() {
-		var e model.Event
-		if err := rows.Scan(&e.Pubkey, &e.Organizer, &e.Slug, &e.Title, &e.Description,
-			&e.Venue, &e.City, &e.ImageURI, &e.StartsAt, &e.EndsAt, &e.TicketPriceLamport,
-			&e.Capacity, &e.TicketsSold, &e.HotSale, &e.Status); err != nil {
+		var r row
+		if err := rows.Scan(&r.Pubkey, &r.Organizer, &r.Slug, &r.Title, &r.Description,
+			&r.Venue, &r.City, &r.ImageURI, &r.StartsAt, &r.EndsAt, &r.TicketPriceLamport,
+			&r.Capacity, &r.TicketsSold, &r.HotSale, &r.Status, &r.SaleConfigured); err != nil {
 			return nil, 0, err
 		}
-		out = append(out, e)
+		if r.SaleConfigured {
+			r.Event.SaleConfigured = true
+		}
+		out = append(out, r.Event)
 	}
 	return out, total, rows.Err()
 }

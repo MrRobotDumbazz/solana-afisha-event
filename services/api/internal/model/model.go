@@ -75,6 +75,7 @@ type Event struct {
 	Capacity           uint32 `json:"capacity"`
 	TicketsSold        uint32 `json:"tickets_sold"`
 	HotSale            bool   `json:"hot_sale"`
+	SaleConfigured     bool   `json:"sale_configured"`
 	Status             uint8  `json:"-"`
 }
 
