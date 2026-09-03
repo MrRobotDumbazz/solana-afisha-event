@@ -1,8 +1,8 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { PublicKey } from '@solana/web3.js'
 import { useWallet } from '@solana/wallet-adapter-vue'
-import { api, fmtDate, lamportsToSol } from '../api'
+import { api, fmtDate, lamportsToSol, type EventDetails } from '../api'
 import { ixBuyTicket } from '../solana/program'
 import { useTransactions } from '../composables/transaction'
 import QueuePanel from '../components/QueuePanel.vue'
@@ -11,17 +11,18 @@ const props = defineProps({
   pubkey: { type: String, required: true },
 })
 
-const { publicKey } = useWallet()
+const wallet = useWallet()
+const { publicKey } = wallet
 const { pending, error, send } = useTransactions()
 
-const event = ref(null)
+const event = ref<EventDetails | null>(null)
 const error404 = ref(false)
 const justBought = ref(false)
 const now = ref(Math.floor(Date.now() / 1000))
 const myRoundActive = ref(false)
 const queueNonce = ref(0)
 
-let timer
+let timer: ReturnType<typeof setInterval> | undefined
 
 async function load() {
   try {
@@ -31,7 +32,7 @@ async function load() {
   }
 }
 
-function onQueueState(state) {
+function onQueueState(state: { myRoundActive: boolean }) {
   myRoundActive.value = state?.myRoundActive || false
 }
 
@@ -50,9 +51,9 @@ const canBuy = computed(() => {
 async function buy() {
   justBought.value = false
   try {
-    await send(publicKey, [
-      ixBuyTicket(publicKey.value, new PublicKey(props.pubkey), {
-        hot: event.value.hot_sale,
+    await send(wallet, [
+      ixBuyTicket(publicKey.value!, new PublicKey(props.pubkey), {
+        hot: event.value!.hot_sale,
       }),
     ])
     justBought.value = true
@@ -106,7 +107,7 @@ onUnmounted(() => clearInterval(timer))
     <QueuePanel
       v-if="event.hot_sale"
       :event-pubkey="event.pubkey"
-      :buyer="buyerKey"
+      :buyer="buyerKey ?? undefined"
       :now="now"
       :nonce="queueNonce"
       @state="onQueueState"

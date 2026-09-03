@@ -1,8 +1,15 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { PublicKey } from '@solana/web3.js'
 import { useWallet } from '@solana/wallet-adapter-vue'
-import { api, fmtCountdown, fmtDate, lamportsToSol } from '../api'
+import {
+  api,
+  fmtCountdown,
+  fmtDate,
+  lamportsToSol,
+  type QueueState,
+  type QueueEntryInfo,
+} from '../api'
 import { ixJoinQueue } from '../solana/program'
 import { useTransactions } from '../composables/transaction'
 
@@ -13,15 +20,18 @@ const props = defineProps({
   nonce: { type: Number, default: 0 },
 })
 
-const emit = defineEmits(['state'])
+const emit = defineEmits<{
+  (e: 'state', state: { myRoundActive: boolean; entry?: QueueEntryInfo }): void
+}>()
 
-const { publicKey } = useWallet()
+const wallet = useWallet()
+const { publicKey } = wallet
 const { pending, error, send } = useTransactions()
 
-const queue = ref(null)
+const queue = ref<QueueState | null>(null)
 const joined = ref(false)
 
-let timer
+let timer: ReturnType<typeof setInterval> | undefined
 
 async function load() {
   try {
@@ -98,7 +108,7 @@ watch(
 function emitState() {
   emit('state', {
     myRoundActive: myRoundActive.value,
-    entry: myEntry.value,
+    entry: myEntry.value ?? undefined,
   })
 }
 
@@ -112,7 +122,7 @@ const canJoin = computed(
 
 async function join() {
   try {
-    await send(publicKey, [ixJoinQueue(publicKey.value, new PublicKey(props.eventPubkey))])
+    await send(wallet, [ixJoinQueue(publicKey.value!, new PublicKey(props.eventPubkey))])
     joined.value = true
     await load()
   } catch {

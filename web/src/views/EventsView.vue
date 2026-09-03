@@ -1,18 +1,18 @@
-<script setup>
+<script setup lang="ts">
 import { onMounted, onUnmounted, ref, computed } from 'vue'
-import { api } from '../api'
+import { api, type EventSummary } from '../api'
 import EventCard from '../components/EventCard.vue'
 
-const events = ref([])
+const events = ref<EventSummary[]>([])
 const total = ref(0)
-const error = ref(null)
+const error = ref<string | null>(null)
 const loading = ref(true)
 const city = ref('')
 const query = ref('')
 const upcoming = ref(true)
 const now = ref(Math.floor(Date.now() / 1000))
 
-let timer
+let timer: ReturnType<typeof setInterval> | undefined
 
 async function load() {
   loading.value = true

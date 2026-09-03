@@ -1,21 +1,27 @@
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useWallet } from '@solana/wallet-adapter-vue'
+import type { WalletName } from '@solana/wallet-adapter-base'
 
 const { wallets, select, disconnect, publicKey, connecting } = useWallet()
 const open = ref(false)
 
-const list = computed(() =>
-  wallets.value.map((w) => ({
+interface WalletItem {
+  name: string
+  icon: string | null
+  installed: boolean
+}
+
+const list = computed<WalletItem[]>(() =>
+  (wallets ?? []).map((w) => ({
     name: w.adapter.name,
-    icon: w.adapter.icon,
-    readyState: w.readyState,
+    icon: w.adapter.icon ?? null,
     installed: w.readyState === 'Installed',
   })),
 )
 
-function pick(name) {
-  select(name)
+function pick(name: string) {
+  select(name as WalletName)
   open.value = false
 }
 </script>
@@ -45,8 +51,8 @@ function pick(name) {
           </button>
         </div>
         <p class="muted hint">
-          Phantom, Solflare, Backpack, Glow, Brave, Exodus и другие Wallet Standard
-          кошельки находятся автоматически при установке расширения.
+          Кошельки Wallet Standard (Phantom, Solflare, Backpack, Glow, Brave, Exodus)
+          находятся автоматически при установке расширения.
         </p>
       </div>
     </div>

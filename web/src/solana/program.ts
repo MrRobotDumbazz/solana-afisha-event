@@ -6,71 +6,91 @@ export const PROGRAM_ID = new PublicKey('7J6VC2HsTxBCBMc94FbcfT2NcN2bmSK5nhjejeu
 export const SYSTEM_PROGRAM_ID = new PublicKey('11111111111111111111111111111111')
 export const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
 export const ATA_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+export const SLOT_HASHES_SYSVAR = new PublicKey('SysvarS1otHashes111111111111111111111111111')
 
-function disc(name) {
+function disc(name: string): Uint8Array {
   return new Uint8Array(sha256(new TextEncoder().encode(`global:${name}`)).slice(0, 8))
 }
 
-export function pdaEvent(organizer, slug) {
+export interface EventParams {
+  title: string
+  description: string
+  venue: string
+  city: string
+  image_uri: string
+  starts_at: bigint
+  ends_at: bigint
+  ticket_price_lamports: bigint
+  capacity: number
+  hot_sale: boolean
+}
+
+export interface SaleParams {
+  registration_start: bigint
+  registration_end: bigint
+  reveal_at: bigint
+  claim_start: bigint
+  round_duration_secs: bigint
+  stake_lamports: bigint
+  window_size: number
+}
+
+export function pdaEvent(organizer: PublicKey, slug: string): PublicKey {
   return PublicKey.findProgramAddressSync(
     [Buffer.from('event'), organizer.toBuffer(), Buffer.from(slug)],
     PROGRAM_ID,
   )[0]
 }
 
-export function pdaVault(event) {
+export function pdaVault(event: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from('vault'), event.toBuffer()], PROGRAM_ID)[0]
 }
 
-export function pdaMint(event, buyer) {
+export function pdaMint(event: PublicKey, buyer: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [Buffer.from('mint'), event.toBuffer(), buyer.toBuffer()],
     PROGRAM_ID,
   )[0]
 }
 
-export function pdaTicket(event, buyer) {
+export function pdaTicket(event: PublicKey, buyer: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [Buffer.from('ticket'), event.toBuffer(), buyer.toBuffer()],
     PROGRAM_ID,
   )[0]
 }
 
-export function pdaSale(event) {
+export function pdaSale(event: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from('sale'), event.toBuffer()], PROGRAM_ID)[0]
 }
 
-export function pdaQueueEntry(event, buyer) {
+export function pdaQueueEntry(event: PublicKey, buyer: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [Buffer.from('queue'), event.toBuffer(), buyer.toBuffer()],
     PROGRAM_ID,
   )[0]
 }
 
-export function buyerAta(owner, mint) {
+export function buyerAta(owner: PublicKey, mint: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [owner.toBuffer(), TOKEN_2022_PROGRAM_ID.toBuffer(), mint.toBuffer()],
     ATA_PROGRAM_ID,
   )[0]
 }
 
-function serializeEventParams(w, p) {
-  w.str(p.title)
-    .str(p.description)
-    .str(p.venue)
-    .str(p.city)
-    .str(p.image_uri)
-    .i64(p.starts_at)
-    .i64(p.ends_at)
-    .u64(p.ticket_price_lamports)
-    .u32(p.capacity)
-    .bool(p.hot_sale)
-}
-
-export function ixInitEvent(organizer, slug, params) {
+export function ixInitEvent(organizer: PublicKey, slug: string, params: EventParams) {
   const w = new BorshWriter()
   w.str(slug)
-  serializeEventParams(w, params)
+  w.str(params.title)
+    .str(params.description)
+    .str(params.venue)
+    .str(params.city)
+    .str(params.image_uri)
+    .i64(params.starts_at)
+    .i64(params.ends_at)
+    .u64(params.ticket_price_lamports)
+    .u32(params.capacity)
+    .bool(params.hot_sale)
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
@@ -83,7 +103,7 @@ export function ixInitEvent(organizer, slug, params) {
   })
 }
 
-export function ixJoinQueue(buyer, event) {
+export function ixJoinQueue(buyer: PublicKey, event: PublicKey) {
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
@@ -98,7 +118,12 @@ export function ixJoinQueue(buyer, event) {
   })
 }
 
-export function ixConfigureSale(organizer, event, slug, params) {
+export function ixConfigureSale(
+  organizer: PublicKey,
+  event: PublicKey,
+  slug: string,
+  params: SaleParams,
+) {
   const w = new BorshWriter()
   w.str(slug)
   w.i64(params.registration_start)
@@ -120,11 +145,7 @@ export function ixConfigureSale(organizer, event, slug, params) {
   })
 }
 
-export const SLOT_HASHES_SYSVAR = new PublicKey(
-  'SysvarS1otHashes111111111111111111111111111',
-)
-
-export function ixSettleRandomness(caller, event) {
+export function ixSettleRandomness(caller: PublicKey, event: PublicKey) {
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
@@ -137,7 +158,11 @@ export function ixSettleRandomness(caller, event) {
   })
 }
 
-export function ixBuyTicket(buyer, event, { hot = false } = {}) {
+export function ixBuyTicket(
+  buyer: PublicKey,
+  event: PublicKey,
+  { hot = false }: { hot?: boolean } = {},
+) {
   const mint = pdaMint(event, buyer)
   return new TransactionInstruction({
     programId: PROGRAM_ID,
@@ -162,7 +187,12 @@ export function ixBuyTicket(buyer, event, { hot = false } = {}) {
   })
 }
 
-export function ixCheckIn(organizer, event, ticket, slug) {
+export function ixCheckIn(
+  organizer: PublicKey,
+  event: PublicKey,
+  ticket: PublicKey,
+  slug: string,
+) {
   const w = new BorshWriter()
   w.str(slug)
   return new TransactionInstruction({

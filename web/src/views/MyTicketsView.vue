@@ -1,12 +1,12 @@
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { useWallet } from '@solana/wallet-adapter-vue'
-import { api } from '../api'
+import { api, type WalletTicket } from '../api'
 import TicketCard from '../components/TicketCard.vue'
 
 const { publicKey } = useWallet()
-const tickets = ref(null)
-const error = ref(null)
+const tickets = ref<WalletTicket[] | null>(null)
+const error = ref<string | null>(null)
 
 async function load() {
   if (!publicKey.value) {

@@ -8,7 +8,7 @@ import './style.css'
 initWallet({
   wallets: buildWalletAdapters(),
   autoConnect: true,
-  onError(error) {
+  onError(error: unknown) {
     console.warn('wallet error', error)
   },
 })

@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { lamportsToSol, fmtDate } from '../api'
 
 const props = defineProps({

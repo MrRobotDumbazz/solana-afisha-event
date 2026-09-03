@@ -1,25 +1,27 @@
-<script setup>
+<script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import jsQR from 'jsqr'
 import { PublicKey } from '@solana/web3.js'
 import { useWallet } from '@solana/wallet-adapter-vue'
-import { api, fmtDate } from '../api'
+import { api, fmtDate, type WalletTicket } from '../api'
 import { ixCheckIn } from '../solana/program'
 import { useTransactions } from '../composables/transaction'
 
-const { publicKey } = useWallet()
+const wallet = useWallet()
+const { publicKey } = wallet
 const { pending, error, send } = useTransactions()
 
-const video = ref(null)
-const canvas = ref(null)
+const video = ref<HTMLVideoElement | null>(null)
+const canvas = ref<HTMLCanvasElement | null>(null)
 const scanning = ref(false)
 const status = ref('Наведите камеру на QR-код билета')
-const ticket = ref(null)
-const ticketError = ref(null)
+type ScannedTicket = WalletTicket & { _slug?: string; _event?: unknown }
+const ticket = ref<ScannedTicket | null>(null)
+const ticketError = ref<string | null>(null)
 const checkedIn = ref(false)
 const notOrganizer = ref(false)
 
-let stream = null
+let stream: MediaStream | null = null
 let raf = 0
 
 onMounted(start)
@@ -30,6 +32,7 @@ async function start() {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment' },
     })
+    if (!video.value) return
     video.value.srcObject = stream
     await video.value.play()
     scanning.value = true
@@ -49,10 +52,11 @@ function tick() {
   if (!scanning.value) return
   const v = video.value
   const c = canvas.value
-  if (v.readyState === v.HAVE_ENOUGH_DATA && c) {
+  if (v && c && v.readyState === v.HAVE_ENOUGH_DATA) {
     c.width = v.videoWidth
     c.height = v.videoHeight
     const ctx = c.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return
     ctx.drawImage(v, 0, 0, c.width, c.height)
     const image = ctx.getImageData(0, 0, c.width, c.height)
     const code = jsQR(image.data, image.width, image.height, { inversionAttempts: 'dontInvert' })
@@ -64,7 +68,7 @@ function tick() {
   raf = requestAnimationFrame(tick)
 }
 
-async function handleScan(mint) {
+async function handleScan(mint: string) {
   stop()
   status.value = `QR: ${mint}`
   ticketError.value = null
@@ -75,8 +79,7 @@ async function handleScan(mint) {
     const t = await api.ticketByMint(mint)
     ticket.value = t
     const ev = await api.event(t.event_pubkey)
-    ticket.value._slug = ev.slug
-    ticket.value._event = ev
+    ticket.value = { ...t, _slug: ev.slug, _event: ev }
     notOrganizer.value = ev.organizer !== publicKey.value?.toBase58()
   } catch {
     ticketError.value = 'Билет не найден в индексе'
@@ -87,25 +90,23 @@ async function handleScan(mint) {
 }
 
 async function checkIn() {
-  const t = ticket.value
+  const t = ticket.value!
   try {
     await send(
-      publicKey,
+      wallet,
       [
         ixCheckIn(
-          publicKey.value,
+          publicKey.value!,
           new PublicKey(t.event_pubkey),
           new PublicKey(t.pubkey),
-          t._slug,
+          t._slug ?? '',
         ),
       ],
       { computeUnits: 200000 },
     )
     checkedIn.value = true
     const fresh = await api.ticketByMint(t.mint)
-    fresh._slug = t._slug
-    fresh._event = t._event
-    ticket.value = fresh
+    ticket.value = { ...fresh, _slug: t._slug }
   } catch {
   }
 }

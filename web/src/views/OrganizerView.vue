@@ -1,15 +1,16 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useWallet } from '@solana/wallet-adapter-vue'
 import { PublicKey } from '@solana/web3.js'
-import { api, fmtDate, lamportsToSol } from '../api'
+import { api, fmtDate, lamportsToSol, type EventSummary } from '../api'
 import { ixInitEvent, ixConfigureSale } from '../solana/program'
 import { useTransactions } from '../composables/transaction'
 
-const { publicKey } = useWallet()
+const wallet = useWallet()
+const { publicKey } = wallet
 const { pending, error, send } = useTransactions()
 
-const myEvents = ref([])
+const myEvents = ref<EventSummary[]>([])
 const created = ref(false)
 
 const form = ref({
@@ -27,8 +28,16 @@ const form = ref({
   hot_sale: false,
 })
 
-const saleForm = ref(null)
-const saleEvent = ref(null)
+const saleForm = ref<{
+  registration_start: number
+  registration_end: number
+  reveal_at: number
+  claim_start: number
+  round_duration_secs: number
+  stake_sol: number
+  window_size: number
+} | null>(null)
+const saleEvent = ref<EventSummary | null>(null)
 
 async function loadMine() {
   if (!publicKey.value) {
@@ -65,6 +74,8 @@ const canCreate = computed(
 
 async function createEvent() {
   created.value = false
+  const start = startsAt.value
+  if (start === null) return
   const f = form.value
   const params = {
     title: f.title,
@@ -72,14 +83,14 @@ async function createEvent() {
     venue: f.venue,
     city: f.city,
     image_uri: f.image_uri || '',
-    starts_at: BigInt(startsAt.value),
-    ends_at: BigInt(startsAt.value + f.durationHours * 3600),
+    starts_at: BigInt(start),
+    ends_at: BigInt(start + f.durationHours * 3600),
     ticket_price_lamports: BigInt(Math.round(f.priceSol * 1e9)),
     capacity: Number(f.capacity),
     hot_sale: f.hot_sale,
   }
   try {
-    await send(publicKey, [ixInitEvent(publicKey.value, slugify(f.slug), params)])
+    await send(wallet, [ixInitEvent(publicKey.value!, slugify(f.slug), params)])
     created.value = true
     form.value.slug = ''
     form.value.title = ''
@@ -88,7 +99,7 @@ async function createEvent() {
   }
 }
 
-function slugify(s) {
+function slugify(s: string) {
   return s
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')
@@ -96,7 +107,7 @@ function slugify(s) {
     .slice(0, 32)
 }
 
-function openSaleConfig(ev) {
+function openSaleConfig(ev: EventSummary) {
   saleEvent.value = ev
   const now = Math.floor(Date.now() / 1000)
   saleForm.value = {
@@ -113,13 +124,13 @@ function openSaleConfig(ev) {
 const canConfigure = computed(() => saleEvent.value && !pending.value)
 
 async function configureSale() {
-  const f = saleForm.value
-  const ev = saleEvent.value
+  const f = saleForm.value!
+  const ev = saleEvent.value!
   try {
     await send(
-      publicKey,
+      wallet,
       [
-        ixConfigureSale(publicKey.value, new PublicKey(ev.pubkey), ev.slug, {
+        ixConfigureSale(publicKey.value!, new PublicKey(ev.pubkey), ev.slug, {
           registration_start: BigInt(f.registration_start),
           registration_end: BigInt(f.registration_end),
           reveal_at: BigInt(f.reveal_at),
@@ -177,7 +188,7 @@ async function configureSale() {
         </div>
       </div>
 
-      <div v-if="saleEvent" class="card">
+      <div v-if="saleEvent && saleForm" class="card">
         <h3>Настройка очереди: {{ saleEvent.title }}</h3>
         <div class="form">
           <div class="row4">

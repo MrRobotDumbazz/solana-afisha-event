@@ -1,37 +1,40 @@
-import { ref, watch } from 'vue'
+import { ref, watch, type Ref } from 'vue'
 import { useWallet } from '@solana/wallet-adapter-vue'
 
-const token = ref(null)
-const authWallet = ref(null)
-const authError = ref(null)
-const signingIn = ref(false)
+const token = ref<string | null>(null)
+const authWallet = ref<string | null>(null)
 
 const TOKEN_KEY = 'afisha_auth_token'
 const WALLET_KEY = 'afisha_auth_wallet'
 
 function loadStored() {
   try {
-    token.value = localStorage.getItem(TOKEN_KEY) || null
-    authWallet.value = localStorage.getItem(WALLET_KEY) || null
-  } catch {}
+    token.value = localStorage.getItem(TOKEN_KEY)
+    authWallet.value = localStorage.getItem(WALLET_KEY)
+  } catch {
+    /* localStorage недоступен */
+  }
 }
 loadStored()
 
 export function useAuth() {
   const { publicKey, signMessage } = useWallet()
 
-  const isAuthed = ref(
-    Boolean(token.value && authWallet.value && authWallet.value === publicKey.value?.toBase58()),
+  const isAuthed: Ref<boolean> = ref(
+    Boolean(token.value && authWallet.value && publicKey.value?.toBase58() === authWallet.value),
   )
 
   watch(publicKey, (pk) => {
     isAuthed.value = Boolean(pk && token.value && authWallet.value === pk.toBase58())
   })
 
-  async function signIn() {
+  const authError = ref<string | null>(null)
+  const signingIn = ref(false)
+
+  async function signIn(): Promise<void> {
     if (!publicKey.value) {
       authError.value = 'Сначала подключите кошелёк'
-      return
+      throw new Error(authError.value)
     }
     authError.value = null
     signingIn.value = true
@@ -42,12 +45,15 @@ export function useAuth() {
         body: JSON.stringify({ wallet: publicKey.value.toBase58() }),
       })
       if (!nonceRes.ok) throw new Error('не удалось получить nonce')
-      const { nonce, message } = await nonceRes.json()
+      const { nonce, message } = (await nonceRes.json()) as { nonce: string; message: string }
 
+      const signFn = signMessage.value
+      if (!signFn) {
+        throw new Error('Кошелёк не поддерживает подпись сообщений')
+      }
       const encoded = new TextEncoder().encode(message)
-      const signature = await signMessage.value(encoded, 'utf8')
-
-      const sigB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
+      const signature: Uint8Array = await signFn(encoded)
+      const sigB64 = btoa(String.fromCharCode(...signature))
 
       const verifyRes = await fetch('/api/v1/auth/verify', {
         method: 'POST',
@@ -59,24 +65,24 @@ export function useAuth() {
         }),
       })
       if (!verifyRes.ok) {
-        const body = await verifyRes.json().catch(() => ({}))
+        const body = (await verifyRes.json().catch(() => ({}))) as { error?: string }
         throw new Error(body.error || 'подпись отклонена')
       }
-      const data = await verifyRes.json()
+      const data = (await verifyRes.json()) as { token: string; wallet: string }
       token.value = data.token
       authWallet.value = data.wallet
       localStorage.setItem(TOKEN_KEY, data.token)
       localStorage.setItem(WALLET_KEY, data.wallet)
       isAuthed.value = true
     } catch (e) {
-      authError.value = e?.message || 'ошибка входа'
+      authError.value = e instanceof Error ? e.message : 'ошибка входа'
       throw e
     } finally {
       signingIn.value = false
     }
   }
 
-  function signOut() {
+  function signOut(): void {
     token.value = null
     authWallet.value = null
     isAuthed.value = false
@@ -84,7 +90,7 @@ export function useAuth() {
     localStorage.removeItem(WALLET_KEY)
   }
 
-  async function authFetch(path, options = {}) {
+  async function authFetch(path: string, options: RequestInit = {}): Promise<Response> {
     const headers = new Headers(options.headers || {})
     if (token.value) headers.set('Authorization', `Bearer ${token.value}`)
     return fetch(path, { ...options, headers })
