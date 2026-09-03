@@ -1,4 +1,5 @@
 import { createApp } from 'vue'
+import './polyfills'
 import { initWalletStore } from './wallet/store'
 import App from './App.vue'
 import { router } from './router'
