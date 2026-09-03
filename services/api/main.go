@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"afisha/api/internal/api"
+	"afisha/api/internal/auth"
 	"afisha/api/internal/indexer"
 	"afisha/api/internal/store"
 )
@@ -87,7 +88,7 @@ func main() {
 	srv := api.New(st, logger)
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           srv.Routes(),
+		Handler:           srv.Routes(auth.NewServer(auth.NewManager(logger), logger).Routes()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"afisha/api/internal/auth"
 	"afisha/api/internal/model"
 	"afisha/api/internal/store"
 )
@@ -20,7 +21,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	return &Server{store: st, logger: logger}
 }
 
-func (s *Server) Routes() *http.ServeMux {
+func (s *Server) Routes(authRoutes []auth.Route) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
@@ -29,6 +30,9 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/events/{pubkey}/queue", s.handleEventQueue)
 	mux.HandleFunc("GET /api/v1/wallets/{pubkey}/tickets", s.handleWalletTickets)
 	mux.HandleFunc("GET /api/v1/tickets/mint/{mint}", s.handleTicketByMint)
+	for _, r := range authRoutes {
+		mux.HandleFunc(r.Pattern, r.Handler)
+	}
 	return mux
 }
 
