@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useWallet } from '@solana/wallet-adapter-vue'
+import { useWalletStore } from '../wallet/store'
 import { PublicKey } from '@solana/web3.js'
 import { api, fmtDate, lamportsToSol, type EventSummary } from '../api'
 import { ixInitEvent, ixConfigureSale } from '../solana/program'
 import { useTransactions } from '../composables/transaction'
 
-const wallet = useWallet()
+const wallet = useWalletStore()
 const { publicKey } = wallet
 const { pending, error, send } = useTransactions()
 

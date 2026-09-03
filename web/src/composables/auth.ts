@@ -1,5 +1,5 @@
 import { ref, watch, type Ref } from 'vue'
-import { useWallet } from '@solana/wallet-adapter-vue'
+import { useWalletStore } from '../wallet/store'
 
 const token = ref<string | null>(null)
 const authWallet = ref<string | null>(null)
@@ -18,7 +18,7 @@ function loadStored() {
 loadStored()
 
 export function useAuth() {
-  const { publicKey, signMessage } = useWallet()
+  const { publicKey, signMessage } = useWalletStore()
 
   const isAuthed: Ref<boolean> = ref(
     Boolean(token.value && authWallet.value && publicKey.value?.toBase58() === authWallet.value),
@@ -47,12 +47,8 @@ export function useAuth() {
       if (!nonceRes.ok) throw new Error('не удалось получить nonce')
       const { nonce, message } = (await nonceRes.json()) as { nonce: string; message: string }
 
-      const signFn = signMessage.value
-      if (!signFn) {
-        throw new Error('Кошелёк не поддерживает подпись сообщений')
-      }
       const encoded = new TextEncoder().encode(message)
-      const signature: Uint8Array = await signFn(encoded)
+      const signature: Uint8Array = await signMessage(encoded)
       const sigB64 = btoa(String.fromCharCode(...signature))
 
       const verifyRes = await fetch('/api/v1/auth/verify', {

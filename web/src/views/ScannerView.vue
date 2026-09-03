@@ -2,12 +2,12 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import jsQR from 'jsqr'
 import { PublicKey } from '@solana/web3.js'
-import { useWallet } from '@solana/wallet-adapter-vue'
+import { useWalletStore } from '../wallet/store'
 import { api, fmtDate, type WalletTicket } from '../api'
 import { ixCheckIn } from '../solana/program'
 import { useTransactions } from '../composables/transaction'
 
-const wallet = useWallet()
+const wallet = useWalletStore()
 const { publicKey } = wallet
 const { pending, error, send } = useTransactions()
 

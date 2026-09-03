@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { PublicKey } from '@solana/web3.js'
-import { useWallet } from '@solana/wallet-adapter-vue'
+import { useWalletStore } from '../wallet/store'
 import {
   api,
   fmtCountdown,
@@ -24,7 +24,7 @@ const emit = defineEmits<{
   (e: 'state', state: { myRoundActive: boolean; entry?: QueueEntryInfo }): void
 }>()
 
-const wallet = useWallet()
+const wallet = useWalletStore()
 const { publicKey } = wallet
 const { pending, error, send } = useTransactions()
 

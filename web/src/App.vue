@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { useWallet } from '@solana/wallet-adapter-vue'
+import { useWalletStore } from './wallet/store'
 import { RouterLink } from 'vue-router'
 import ConnectWallet from './components/ConnectWallet.vue'
 import { useAuth } from './composables/auth'
 
-const { publicKey } = useWallet()
+const { publicKey } = useWalletStore()
 const { isAuthed, signIn, signOut, signingIn, authError } = useAuth()
 
 function short(address: string) {

@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useWallet } from '@solana/wallet-adapter-vue'
-import type { WalletName } from '@solana/wallet-adapter-base'
+import { useWalletStore } from '../wallet/store'
 
-const { wallets, select, disconnect, publicKey, connecting } = useWallet()
+const { wallets, select, disconnect, publicKey, connecting } = useWalletStore()
 const open = ref(false)
 
 interface WalletItem {
@@ -21,8 +20,8 @@ const list = computed<WalletItem[]>(() =>
 )
 
 function pick(name: string) {
-  select(name as WalletName)
   open.value = false
+  select(name).catch(() => {})
 }
 </script>
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { PublicKey } from '@solana/web3.js'
-import { useWallet } from '@solana/wallet-adapter-vue'
+import { useWalletStore } from '../wallet/store'
 import { api, fmtDate, lamportsToSol, type EventDetails } from '../api'
 import { ixBuyTicket } from '../solana/program'
 import { useTransactions } from '../composables/transaction'
@@ -11,7 +11,7 @@ const props = defineProps({
   pubkey: { type: String, required: true },
 })
 
-const wallet = useWallet()
+const wallet = useWalletStore()
 const { publicKey } = wallet
 const { pending, error, send } = useTransactions()
 

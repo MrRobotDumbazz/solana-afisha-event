@@ -1,11 +1,11 @@
 import { ref, type Ref } from 'vue'
 import { Transaction, ComputeBudgetProgram, type PublicKey, type TransactionInstruction } from '@solana/web3.js'
-import type { WalletStore } from '@solana/wallet-adapter-vue'
+import type { WalletStoreApi } from '../wallet/store'
 import { connection } from '../api'
 
 interface WalletSender {
   publicKey: Ref<PublicKey | null>
-  sendTransaction: WalletStore['sendTransaction']
+  sendTransaction: WalletStoreApi['sendTransaction']
 }
 
 export function useTransactions() {
